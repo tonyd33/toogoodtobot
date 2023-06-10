@@ -8,8 +8,8 @@ Script to check for newly available items on TooGoodToGo.
 
 As I currently don't know a way to refresh authorization without manual usage
 of the app, you must also install
-(mitmproxy)[https://docs.mitmproxy.org/stable/overview-installation/] (or any
-other proxy tool) on your computer and (Wireguard)[https://www.wireguard.com/]
+[mitmproxy](https://docs.mitmproxy.org/stable/overview-installation/) (or any
+other proxy tool) on your computer and [Wireguard](https://www.wireguard.com/)
 on your phone so you can read http requests.
 
 - Run `mitmweb -m wireguard` on your computer. A browser window should open with

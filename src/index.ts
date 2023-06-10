@@ -8,87 +8,131 @@ import fs from "fs";
 import {
     aggregateResultItems,
     getNewlyAvailableItems,
+    ItemsById,
     sleep,
 } from "./utils.js";
 import { discover } from "./api.js";
+import { sendNotificationForItem, testNotification } from "./notify.js";
+
 dotenv.config();
 
 const parsed = await yargs(hideBin(process.argv))
-    .command("$1", "")
-    .option("u", { alias: "user-id", type: "string" })
     .option("lng", { alias: "longitude", type: "number" })
     .option("lat", { alias: "latitude", type: "number" })
     .option("r", { alias: "radius", type: "number" })
-    .option("c", { alias: "cookie", type: "string" })
-    .option("a", { alias: "auth", type: "string" })
+    .option("t", {
+        alias: "timeout",
+        type: "number",
+        default: 5,
+        describe: "How long to wait before refreshing in minutes",
+    })
+    .option("c", {
+        alias: "cache",
+        type: "string",
+        default: "./cached.json",
+        describe: "Where to store cached results",
+    })
     .parse();
 
-const oldItemsPath = "./cached.json";
+interface AppOpts extends DiscoverOpts {
+    ifttt_key: string;
+    timeout: number;
+    cache: string;
+}
 
-function collect_opts(): Partial<DiscoverOpts> {
-    const { USER_ID, LONGITUDE, LATITUDE, RADIUS, COOKIE, AUTH } = process.env;
+function collect_opts(): AppOpts {
+    const { USER_ID, LONGITUDE, LATITUDE, RADIUS, COOKIE, AUTH, IFTTT_KEY } =
+        process.env;
 
-    return {
-        userId: ((parsed.userId || USER_ID) as any).toString(),
+    const opts = {
+        userId: (USER_ID as any).toString() as string,
         longitude: parseFloat((parsed.longitude || LONGITUDE) as any),
         latitude: parseFloat((parsed.latitude || LATITUDE) as any),
         radius: parseFloat((parsed.radius || RADIUS) as any),
-        cookie: (parsed.cookie || COOKIE) as any,
-        auth: (parsed.auth || AUTH) as any,
+        cookie: COOKIE,
+        auth: AUTH,
+        ifttt_key: IFTTT_KEY as string,
+        timeout: parsed.timeout as number,
+        cache: parsed.cache as string,
     };
+
+    if (
+        !opts.userId ||
+        !opts.longitude ||
+        !opts.latitude ||
+        !opts.radius ||
+        !opts.ifttt_key
+    ) {
+        console.error("Options are not specified correctly, got:");
+        console.error(opts);
+        process.exit(1);
+    }
+
+    return opts;
 }
 
-async function loadOldItems() {
+async function loadOldItems(
+    opts: Pick<AppOpts, "cache">
+): Promise<ItemsById | null> {
     try {
         return JSON.parse(
-            await fs.promises.readFile(oldItemsPath, {
+            await fs.promises.readFile(opts.cache, {
                 encoding: "utf8",
             })
         );
     } catch (err) {
-        return {};
+        return null;
     }
 }
 
 /**
  * Refreshes cache and compares for newly available items and returns it.
  */
-async function refreshCacheForNewlyAvailableItems(opts: DiscoverOpts) {
+async function refreshCacheForNewlyAvailableItems(opts: AppOpts) {
     const [oldItems, newResults] = await Promise.all([
-        loadOldItems(),
+        loadOldItems(opts),
         discover(opts),
     ]);
     const newItems = aggregateResultItems(newResults);
+    // Cache did not exist. No items can be considered new.
+    if (oldItems === null) {
+        return [];
+    }
 
     const newlyAvailableItems = getNewlyAvailableItems(oldItems, newItems);
-    await fs.promises.writeFile(
-        oldItemsPath,
-        JSON.stringify(newItems, null, 2),
-        { encoding: "utf8" }
-    );
+    await fs.promises.writeFile(opts.cache, JSON.stringify(newItems, null, 2), {
+        encoding: "utf8",
+    });
 
     return newlyAvailableItems;
 }
 
-async function refresh(opts: DiscoverOpts) {
+async function refresh(opts: AppOpts) {
     const newlyAvailableItems = await refreshCacheForNewlyAvailableItems(opts);
-    console.log("Newly available items");
-    console.log(JSON.stringify(newlyAvailableItems, null, 2));
+    // await omitted purposefully. Don't need to hang on sending notifications.
+    Promise.all(
+        newlyAvailableItems.map((item) =>
+            sendNotificationForItem(item, opts.ifttt_key)
+        )
+    );
 }
 
 async function main() {
     const opts = collect_opts();
-    if (!opts.userId || !opts.longitude || !opts.latitude || !opts.radius) {
-        console.error("User details not specified correctly.");
-        process.exit(1);
-    }
-    console.log("Starting with options", opts);
+    console.log("Starting with options:");
+    console.log(opts);
+
+    console.log("Testing IFTTT configuration...");
+    await testNotification(opts.ifttt_key);
+    console.log(
+        "Notification sent. If you don't receive a notification within a minute, you may have misconfigured IFTTT."
+    );
 
     while (true) {
         console.log("Refreshing results...");
-        await refresh(opts as DiscoverOpts);
-        console.log("Sleeping for 5 minutes...");
-        await sleep(1000 * 60 * 5);
+        await refresh(opts as AppOpts);
+        console.log(`Sleeping for ${opts.timeout} minutes...`);
+        await sleep(1000 * 60 * opts.timeout);
     }
 }
 

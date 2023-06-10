@@ -26,6 +26,18 @@ a QR code
 
 Don't forget to turn off Wireguard on your phone once you're done this.
 
+## Create IFTTT applet for notifications
+
+- Download IFTTT on your phone
+- Create an applet:
+  - If: Webhooks -> Receive a web request
+    - Event Name: `toogoodtobot`
+  - Then: Notifications -> Send a rich notification from the IFTTT app
+    - Message: Add Ingredient -> `Value1`
+    - Image URL: Add Ingredient -> `Value2`
+    - Everything else: Up to you
+- Create and find your IFTTT webhook key from the [IFTTT site](https://ifttt.com/maker_webhooks) and copy it down
+
 ## Install and run the script
 
 ```sh
@@ -44,6 +56,7 @@ LATITUDE="<your latitude>"
 RADIUS="<your radius>"
 AUTH="<your authorization token>"
 COOKIE="<your cookie>"
+IFTTT_KEY="<your webhook key>"
 ```
 
 Run `node dist/index.js`.

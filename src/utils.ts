@@ -1,7 +1,7 @@
 import { BucketType, DiscoverResults, ItemElement } from "./types.js";
 import _ from "lodash";
 
-interface ItemsById {
+export interface ItemsById {
     [id: string]: ItemElement;
 }
 

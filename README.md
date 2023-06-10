@@ -63,5 +63,5 @@ Run `node dist/index.js`.
 
 # Features
 - ✅ Check when item is newly available
-- 🚧 Send notification when item is newly available
+- ✅ Send notification when item is newly available
 - 🚧 Get and refresh credentials without usage of a phone/proxy

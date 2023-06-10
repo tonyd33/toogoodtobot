@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 
-import dotenv from "dotenv";
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
-import { DiscoverOpts } from "./types.js";
 import fs from "fs";
 import {
     aggregateResultItems,
@@ -11,20 +9,22 @@ import {
     ItemsById,
     sleep,
 } from "./utils.js";
-import { discover } from "./api.js";
-import { sendNotificationForItem, testNotification } from "./notify.js";
-
-dotenv.config();
+import { IFTTTNotifier } from "./notify.js";
+import configOpts from "./config.js";
+import { TGTGClient } from "./client.js";
 
 const parsed = await yargs(hideBin(process.argv))
+    .option("email", { type: "string" })
+    .option("ifttt-key", { type: "string" })
+    .option("skip-test", { type: "boolean", default: false })
     .option("lng", { alias: "longitude", type: "number" })
     .option("lat", { alias: "latitude", type: "number" })
     .option("r", { alias: "radius", type: "number" })
     .option("t", {
         alias: "timeout",
         type: "number",
-        default: 5,
-        describe: "How long to wait before refreshing in minutes",
+        default: 180,
+        describe: "How long to wait before refreshing in seconds",
     })
     .option("c", {
         alias: "cache",
@@ -34,105 +34,86 @@ const parsed = await yargs(hideBin(process.argv))
     })
     .parse();
 
-interface AppOpts extends DiscoverOpts {
-    ifttt_key: string;
-    timeout: number;
-    cache: string;
-}
+type AppOpts = typeof configOpts & {
+    skipTest: boolean;
+};
 
-function collect_opts(): AppOpts {
-    const { USER_ID, LONGITUDE, LATITUDE, RADIUS, COOKIE, AUTH, IFTTT_KEY } =
-        process.env;
-
-    const opts = {
-        userId: (USER_ID as any).toString() as string,
-        longitude: parseFloat((parsed.longitude || LONGITUDE) as any),
-        latitude: parseFloat((parsed.latitude || LATITUDE) as any),
-        radius: parseFloat((parsed.radius || RADIUS) as any),
-        cookie: COOKIE,
-        auth: AUTH,
-        ifttt_key: IFTTT_KEY as string,
-        timeout: parsed.timeout as number,
-        cache: parsed.cache as string,
+function getOpts(): AppOpts {
+    return {
+        email: parsed.email ?? configOpts.email,
+        longitude: (parsed.longitude as number) ?? configOpts.longitude,
+        latitude: (parsed.latitude as number) ?? configOpts.latitude,
+        radius: (parsed.radius as number) ?? configOpts.radius,
+        iftttKey: parsed.iftttKey ?? configOpts.iftttKey,
+        timeout: (parsed.timeout as number) ?? configOpts.timeout,
+        cache: (parsed.cache as string) ?? configOpts.timeout,
+        skipTest: !!parsed.skip_test,
     };
-
-    if (
-        !opts.userId ||
-        !opts.longitude ||
-        !opts.latitude ||
-        !opts.radius ||
-        !opts.ifttt_key
-    ) {
-        console.error("Options are not specified correctly, got:");
-        console.error(opts);
-        process.exit(1);
-    }
-
-    return opts;
 }
 
-async function loadOldItems(
-    opts: Pick<AppOpts, "cache">
-): Promise<ItemsById | null> {
+async function compareAndUpdateNewItems(newItems: ItemsById) {
+    const { cache } = getOpts();
+
+    let oldItems: ItemsById | null;
     try {
-        return JSON.parse(
-            await fs.promises.readFile(opts.cache, {
+        oldItems = JSON.parse(
+            await fs.promises.readFile(cache, {
                 encoding: "utf8",
             })
         );
     } catch (err) {
-        return null;
+        oldItems = null;
     }
-}
 
-/**
- * Refreshes cache and compares for newly available items and returns it.
- */
-async function refreshCacheForNewlyAvailableItems(opts: AppOpts) {
-    const [oldItems, newResults] = await Promise.all([
-        loadOldItems(opts),
-        discover(opts),
-    ]);
-    const newItems = aggregateResultItems(newResults);
-    // Cache did not exist. No items can be considered new.
+    // Cache did not exist. No items are considered new.
     if (oldItems === null) {
         return [];
     }
 
     const newlyAvailableItems = getNewlyAvailableItems(oldItems, newItems);
-    await fs.promises.writeFile(opts.cache, JSON.stringify(newItems, null, 2), {
+    await fs.promises.writeFile(cache, JSON.stringify(newItems, null, 2), {
         encoding: "utf8",
     });
 
     return newlyAvailableItems;
 }
 
-async function refresh(opts: AppOpts) {
-    const newlyAvailableItems = await refreshCacheForNewlyAvailableItems(opts);
-    // await omitted purposefully. Don't need to hang on sending notifications.
-    Promise.all(
-        newlyAvailableItems.map((item) =>
-            sendNotificationForItem(item, opts.ifttt_key)
-        )
-    );
-}
-
 async function main() {
-    const opts = collect_opts();
+    const opts = getOpts();
+
     console.log("Starting with options:");
     console.log(opts);
 
-    console.log("Testing IFTTT configuration...");
-    await testNotification(opts.ifttt_key);
-    console.log(
-        "Notification sent. If you don't receive a notification within a minute, you may have misconfigured IFTTT."
-    );
+    const tgtgClient = new TGTGClient({ email: opts.email });
+    const notifier = new IFTTTNotifier(opts.iftttKey);
+
+    if (!opts.skipTest) {
+        console.log("Testing IFTTT configuration...");
+        await notifier.sendTestNotification();
+        console.log(
+            "Notification sent. If you don't receive a notification within a minute, you may have misconfigured IFTTT."
+        );
+    }
 
     while (true) {
         console.log("Refreshing results...");
-        await refresh(opts as AppOpts);
+        const newItems = aggregateResultItems(
+            await tgtgClient.discover({
+                longitude: opts.longitude,
+                latitude: opts.latitude,
+                radius: opts.radius,
+            })
+        );
+        const newlyAvailableItems = await compareAndUpdateNewItems(newItems);
+        // await omitted purposefully. Don't need to hang on sending notifications.
+        Promise.all(
+            newlyAvailableItems.map((item) =>
+                notifier.sendNotificationForItem(item)
+            )
+        );
+
         console.log(`Sleeping for ${opts.timeout} minutes...`);
-        await sleep(1000 * 60 * opts.timeout);
+        await sleep(1000 * opts.timeout);
     }
 }
 

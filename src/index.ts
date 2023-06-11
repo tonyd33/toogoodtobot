@@ -29,7 +29,6 @@ const parsed = await yargs(hideBin(process.argv))
     .option("c", {
         alias: "cache",
         type: "string",
-        default: "./cached.json",
         describe: "Where to store cached results",
     })
     .parse();
@@ -46,7 +45,7 @@ function getOpts(): AppOpts {
         radius: (parsed.radius as number) ?? configOpts.radius,
         iftttKey: parsed.iftttKey ?? configOpts.iftttKey,
         timeout: (parsed.timeout as number) ?? configOpts.timeout,
-        cache: (parsed.cache as string) ?? configOpts.timeout,
+        cache: (parsed.cache as string) ?? configOpts.cache,
         skipTest: !!parsed.skip_test,
     };
 }
@@ -65,17 +64,12 @@ async function compareAndUpdateNewItems(newItems: ItemsById) {
         oldItems = null;
     }
 
-    // Cache did not exist. No items are considered new.
-    if (oldItems === null) {
-        return [];
-    }
-
-    const newlyAvailableItems = getNewlyAvailableItems(oldItems, newItems);
     await fs.promises.writeFile(cache, JSON.stringify(newItems, null, 2), {
         encoding: "utf8",
     });
 
-    return newlyAvailableItems;
+    // No items are considered new if no old items.
+    return oldItems !== null ? getNewlyAvailableItems(oldItems, newItems) : [];
 }
 
 async function main() {

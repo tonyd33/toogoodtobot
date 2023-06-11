@@ -1,15 +1,3 @@
-export interface APIOpts {
-    cookie?: string,
-    auth?: string,
-}
-
-export interface DiscoverOpts extends APIOpts {
-    userId: string,
-    longitude: number,
-    latitude: number,
-    radius: number
-}
-
 export interface DiscoverResults {
     item_availability_status: string;
     buckets:                  Bucket[];

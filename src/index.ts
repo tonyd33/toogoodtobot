@@ -112,7 +112,7 @@ async function main() {
             )
         );
 
-        console.log(`Sleeping for ${opts.timeout} minutes...`);
+        console.log(`Sleeping for ${opts.timeout} seconds...`);
         await sleep(1000 * opts.timeout);
     }
 }

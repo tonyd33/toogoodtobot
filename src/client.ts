@@ -138,7 +138,7 @@ export class TGTGClient implements TGTGClientOpts {
     public async login() {
         // Not first time logging in. Just refresh token
         if (this.isLoggedIn) {
-            this.tryRefreshToken();
+            await this.tryRefreshToken();
             return;
         }
 
